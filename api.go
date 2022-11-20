@@ -1,25 +1,32 @@
 package distributedlock
 
 import (
-	"context"
 	"errors"
 	"time"
 )
 
 var (
-	ErrLockWaitTimeout = errors.New("the lock was acquired over the maximum time")
-	ErrUnlocked        = errors.New("the lock already released")
+	ErrLockWaitTimeout   = errors.New("the lock was acquired over the maximum time")
+	ErrUnlocked          = errors.New("the lock already released")
+	ErrLocked            = errors.New("the lock already occupy")
+	ErrLockRenewalFailed = errors.New("the lock renewal failed")
 )
 
 // DistributedLocker is a distributed lock interface
 type DistributedLocker interface {
-	// Lock locks the given key.
+	// Lock sync locks the given key, no wait
 	// - args:
 	//   - key: The unique identifier of a lock.
-	Lock(ctx context.Context, key string) (UnLocker, error)
+	Lock(key string) (UnLocker, error)
 	// TryLock try to acquire the lock in the timeout duration, argument and return value are the same as Lock.
-	TryLock(ctx context.Context, key string, timeout time.Duration) (UnLocker, error)
+	// - args:
+	//   - timeout: The time is accurate to the second.
+	TryLock(key string, timeout time.Duration) (UnLocker, error)
 }
 
-// UnLocker is the method to unlock the current lock.
-type UnLocker func() error
+type UnLocker interface {
+	// Unlock unlocks the lock.
+	UnLock() error
+	// Error if lock term internal error, return error
+	Error() error
+}
