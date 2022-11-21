@@ -14,23 +14,24 @@ import (
 )
 
 var (
-	testRedisClient              *redis.ClusterClient
-	testRedisDistributedLocker   DistributedLocker
-	testCount                    int32 = 0
-	testConccurrentSecurityCount int32 = 0
+	testRedisClient            *redis.ClusterClient
+	testRedisDistributedLocker DistributedLocker
 )
 
 func setup() error {
 	fmt.Println("setup")
-	testRedisClient = redis.NewClusterClient(&redis.ClusterOptions{})
+	testRedisClient = redis.NewClusterClient(&redis.ClusterOptions{
+		Addrs: []string{
+			"127.0.0.1:6379",
+		},
+		Password: "123456",
+	})
 	_, err := testRedisClient.Ping(context.Background()).Result()
 	if err != nil {
 		return err
 	}
 
-	// results, err := testRedisClient.BRPop(context.Background(), time.Second, "test:name").Result()
-	// fmt.Println(results, err)
-	distributedLock, err := NewDistributedLockWithRedis("test", time.Minute, testRedisClient)
+	distributedLock, err := NewDistributedLockWithRedis("test", time.Minute, NewRedisClient(testRedisClient))
 	if err != nil {
 		return err
 	}
@@ -47,6 +48,10 @@ func teardown() {
 
 func Test_Locker(t *testing.T) {
 	key := "test"
+	var (
+		testCount                   int32 = 0
+		testConcurrentSecurityCount int32 = 0
+	)
 	var wg sync.WaitGroup
 	const execCount int = 100
 	wg.Add(execCount)
@@ -56,7 +61,7 @@ func Test_Locker(t *testing.T) {
 		if err != nil {
 			t.Errorf("Lock key: %s, error: %s", key, err)
 		}
-		atomic.AddInt32(&testConccurrentSecurityCount, 1)
+		atomic.AddInt32(&testConcurrentSecurityCount, 1)
 		testCount++
 		if err := unLocker.UnLock(); err != nil {
 			t.Errorf("UnLock key: %s, error: %s", key, err)
@@ -66,8 +71,8 @@ func Test_Locker(t *testing.T) {
 		go concurrentTest()
 	}
 	wg.Wait()
-	if testConccurrentSecurityCount != int32(execCount) || testCount != int32(execCount) {
-		t.Fatalf("want testConcurrentSecurityCount = %v, testCount = %v got testConcurrentSecurityCount = %v, testCount = %v", execCount, execCount, testConccurrentSecurityCount, testCount)
+	if testConcurrentSecurityCount != int32(execCount) || testCount != int32(execCount) {
+		t.Fatalf("want testConcurrentSecurityCount = %v, testCount = %v got testConcurrentSecurityCount = %v, testCount = %v", execCount, execCount, testConcurrentSecurityCount, testCount)
 	}
 }
 

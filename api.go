@@ -6,10 +6,12 @@ import (
 )
 
 var (
-	ErrLockWaitTimeout   = errors.New("the lock was acquired over the maximum time")
-	ErrUnlocked          = errors.New("the lock already released")
-	ErrLocked            = errors.New("the lock already occupy")
-	ErrLockRenewalFailed = errors.New("the lock renewal failed")
+	ErrLockWaitTimeout    = errors.New("the lock was acquired over the maximum time")
+	ErrUnlocked           = errors.New("the lock already released")
+	ErrLockExpireTooShort = errors.New("lock expire time is too short")
+	ErrInvalidKey         = errors.New("invalid key contain block queue keyword")
+	ErrLocked             = errors.New("the lock already occupy")
+	ErrLockRenewalFailed  = errors.New("the lock renewal failed")
 )
 
 // DistributedLocker is a distributed lock interface

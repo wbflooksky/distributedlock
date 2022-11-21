@@ -9,13 +9,16 @@ import (
 
 	_ "embed"
 
-	"github.com/go-redis/redis/v9"
 	"github.com/google/uuid"
 )
 
 var (
-	ErrLockExpireTooShort = fmt.Errorf("lock expire time is too short")
-	ErrInvalidKey         = fmt.Errorf("invalid key contain block queue keyword")
+	//go:embed lock.lua
+	lockLua string
+	//go:embed unlock.lua
+	unlockLua string
+	//go:embed renewal.lua
+	renewalLua string
 )
 
 const (
@@ -25,37 +28,16 @@ const (
 	blockQueueKeyword         string        = "blockKey"
 )
 
-var (
-	//go:embed lock.lua
-	lockLua string
-	//go:embed unlock.lua
-	unlockLua string
-	//go:embed renewal.lua
-	renewalLua    string
-	lockScript    *redis.Script
-	unlockScript  *redis.Script
-	renewalScript *redis.Script
-)
-
-// Scripter refers to the redis.scripter interface.
-type Scripter interface {
-	Eval(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd
-	EvalSha(ctx context.Context, sha1 string, keys []string, args ...interface{}) *redis.Cmd
-	ScriptExists(ctx context.Context, hashes ...string) *redis.BoolSliceCmd
-	ScriptLoad(ctx context.Context, script string) *redis.StringCmd
-	BRPop(ctx context.Context, timeout time.Duration, keys ...string) *redis.StringSliceCmd
-}
-
 type redisDistributedLocker struct {
 	hashTag string
-	client  Scripter
+	client  RedisClient
 	expire  int64
 }
 
 var _ DistributedLocker = (*redisDistributedLocker)(nil)
 
 type redisDistributedUnLocker struct {
-	client                Scripter
+	client                RedisClient
 	lockKey, waitQueueKey string
 	lockUniqueID          string
 	expire                int64
@@ -67,15 +49,15 @@ type redisDistributedUnLocker struct {
 var _ UnLocker = (*redisDistributedUnLocker)(nil)
 
 func init() {
-	lockScript = redis.NewScript(strings.TrimSpace(lockLua))
-	unlockScript = redis.NewScript(strings.TrimSpace(unlockLua))
-	renewalScript = redis.NewScript(strings.TrimSpace(renewalLua))
+	lockLua = strings.TrimSpace(lockLua)
+	unlockLua = strings.TrimSpace(unlockLua)
+	renewalLua = strings.TrimSpace(renewalLua)
 }
 
 // NewDistributedLockWithRedis ...
 // namespace: hash tag, compatible transaction redis cluster
 // expire: lock expire time, the time is accurate to the second. The value must be no less than four seconds
-func NewDistributedLockWithRedis(namespace string, expire time.Duration, client Scripter) (DistributedLocker, error) {
+func NewDistributedLockWithRedis(namespace string, expire time.Duration, client RedisClient) (DistributedLocker, error) {
 	if expire < minLockExpire {
 		return nil, ErrLockExpireTooShort
 	}
@@ -92,7 +74,7 @@ func (impl *redisDistributedLocker) Lock(key string) (UnLocker, error) {
 	}
 	uniqueID := uuid.New().String()
 	lockKey, waitQueueKey := impl.key(key), impl.blockKey(key)
-	result, err := lockScript.Run(context.Background(), impl.client, []string{lockKey, waitQueueKey}, uniqueID, impl.expire).Int()
+	result, err := impl.client.Eval(context.Background(), lockLua, []string{lockKey, waitQueueKey}, uniqueID, impl.expire)
 	if err != nil {
 		return nil, err
 	}
@@ -124,9 +106,9 @@ func (impl *redisDistributedLocker) TryLock(key string, timeout time.Duration) (
 			if waitTime <= 0 {
 				return nil, ErrLockWaitTimeout
 			}
-			_, err := impl.client.BRPop(context.Background(), waitTime, waitQueueKey).Result()
+			_, err := impl.client.BRPop(context.Background(), waitTime, waitQueueKey)
 			switch err {
-			case redis.Nil:
+			case ErrRedisNil:
 			case nil:
 			default:
 				return nil, err
@@ -141,12 +123,12 @@ func (impl *redisDistributedUnLocker) UnLock() error {
 	if impl.isUnlocked() {
 		return ErrUnlocked
 	}
-	result, err := unlockScript.Run(context.Background(),
-		impl.client,
+	result, err := impl.client.Eval(context.Background(),
+		unlockLua,
 		[]string{impl.lockKey, impl.waitQueueKey},
 		impl.lockUniqueID,
 		blockQueueDeferTimeSecond,
-	).Int()
+	)
 	if err != nil {
 		return err
 	}
@@ -201,7 +183,7 @@ func (impl *redisDistributedUnLocker) startRenewal() {
 }
 
 func (impl *redisDistributedUnLocker) renewal() error {
-	result, err := renewalScript.Run(context.Background(), impl.client, []string{impl.lockKey}, impl.lockUniqueID, impl.expire).Int()
+	result, err := impl.client.Eval(context.Background(), renewalLua, []string{impl.lockKey}, impl.lockUniqueID, impl.expire)
 	if err != nil {
 		return err
 	}
