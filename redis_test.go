@@ -31,7 +31,7 @@ func setup() error {
 		return err
 	}
 
-	distributedLock, err := NewDistributedLockWithRedis("test", time.Minute, NewRedisClient(testRedisClient))
+	distributedLock, err := NewDistributedLockWithRedis("test", time.Minute, testRedisClient)
 	if err != nil {
 		return err
 	}
