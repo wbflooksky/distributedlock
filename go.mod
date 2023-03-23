@@ -1,4 +1,4 @@
-module distributedlock
+module github.com/wbflooksky/distributedlock
 
 go 1.17
 
